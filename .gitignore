@@ -166,3 +166,5 @@ data/checkpoints/
 datasets/
 *.DS_Store
 .data/
+*learned_optimizer_checkpoints/
+*.pptx
