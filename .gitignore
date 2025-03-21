@@ -168,3 +168,5 @@ datasets/
 .data/
 *learned_optimizer_checkpoints/
 *.pptx
+*.png
+*.pt
