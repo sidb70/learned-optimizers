@@ -264,10 +264,7 @@ class MetaTrainer:
 
             losses.append(sample_losses)
             losses[-1][-1] = losses[-1][-1].item()
-            # print("making dot")
-            # make_dot(meta_loss).render("meta_loss")
-            # Source.from_file("meta_loss").render("meta_loss", view=True, cleanup=True)
-            # c = input("Press Enter to continue...")
+
         # Average meta-loss over the batch
         meta_loss = meta_loss / self.config.meta_batch_size
         
@@ -312,7 +309,7 @@ class MetaTrainer:
         )
         
         # Return final loss and accuracy
-        return losses[-1]
+        return losses
     
     def train(self):
         """Full meta-training loop."""
@@ -364,14 +361,16 @@ class MetaTrainer:
             
             # Evaluate
             if iteration % self.config.eval_interval == 0:
-                eval_loss = self.evaluate()
+                curr_eval_losses = self.evaluate()
                 self.meta_optimizer.train()
-                eval_losses.append(eval_loss)
+                eval_losses.append(curr_eval_losses[-1])
                 
-                print(f"Evaluation - Loss: {eval_loss:.6f}")
+                print(f"Evaluation Final Epoch Loss: {curr_eval_losses[-1]:.6f}")
                 
+                self.plot_eval_losses(curr_eval_losses, iteration)
                 # Plot learning curves
-                self.plot_learning_curves(meta_losses, mimic_losses, eval_losses)
+                self.plot_learning_curves(meta_losses, mimic_losses, eval_losses, fname=f'learning_curves_eval_it_{iteration}.png')
+                # Plot inner trajectories 
                 self.plot_inner_trajectory(inner_losses_trajectories)
             
             # Save checkpoint
@@ -387,8 +386,9 @@ class MetaTrainer:
         print("Meta-training complete")
         
         # Final evaluation
-        eval_loss = self.evaluate()
-        print(f"Final Evaluation - Loss: {eval_loss:.6f}")
+        curr_eval_losses = self.evaluate()
+        self.plot_eval_losses(curr_eval_losses, iteration)
+        print(f"Final Evaluation - Loss: {curr_eval_losses[-1]:.6f}")
 
         return meta_losses, mimic_losses, eval_losses
     
@@ -410,7 +410,16 @@ class MetaTrainer:
         self.meta_opt.load_state_dict(checkpoint['meta_opt_state_dict'])
         self.current_iteration = checkpoint['iteration'] + 1
         print(f"Loaded checkpoint from {checkpoint_path}")
-    
+    def plot_eval_losses(self, eval_losses, iteration):
+        # plot curr_eval_losses
+        plt.figure(figsize=(15, 10))
+        plt.plot(range(len(eval_losses)), eval_losses)
+        plt.title('Evaluation Loss')
+        plt.xlabel('Iteration')
+        plt.ylabel('Loss')
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config.save_dir, f'eval_losses_{iteration}.png'))
+        plt.close()
     def plot_inner_trajectory(self, inner_losses_trajectories):
         '''Plot the inner trajectory of the model during meta-training'''
         plt.figure(figsize=(15, 10))
@@ -423,7 +432,7 @@ class MetaTrainer:
         plt.tight_layout()
         plt.savefig(os.path.join(self.config.save_dir, 'inner_trajectories.png'))
         plt.close()
-    def plot_learning_curves(self, meta_losses, mimic_losses, eval_losses):
+    def plot_learning_curves(self, meta_losses, mimic_losses, eval_losses, fname=None):
         """Plot learning curves to visualize training progress."""
         plt.figure(figsize=(15, 10))
         
@@ -458,6 +467,8 @@ class MetaTrainer:
         
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.config.save_dir, 'learning_curves.png'))
+        if fname is None:
+            fname = 'learning_curves.png'
+        plt.savefig(os.path.join(self.config.save_dir, fname))
         plt.close()
 

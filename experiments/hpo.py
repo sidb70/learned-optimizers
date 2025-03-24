@@ -158,12 +158,12 @@ class HyperparameterSearch:
         results_df.to_csv(os.path.join(self.results_dir, 'search_results.csv'), index=False)
         
         # Find best configuration
-        best_idx = results_df['final_accuracy'].idxmax()
+        best_idx = results_df['final_loss'].idxmin()
         self.best_config = configs[best_idx]
-        self.best_accuracy = results_df.loc[best_idx, 'final_accuracy']
+        self.best_loss = results_df.loc[best_idx, 'final_loss']
         
         print(f"Best configuration: {self.best_config.run_id}")
-        print(f"Best accuracy: {self.best_accuracy:.4f}")
+        print(f"Best loss: {self.best_loss:.4f}")
         
         return results_df
     

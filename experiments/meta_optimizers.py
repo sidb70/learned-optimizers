@@ -30,7 +30,7 @@ from optimizees import MLP
 class LSTMOptimizer(nn.Module):
     def init_weights(self, layer):
         if type(layer) == nn.Linear:
-            nn.init.xavier_normal_(layer.weight)
+            nn.init.zeros_(layer.weight.data)
             layer.bias.data.fill_(0.0)
         
 

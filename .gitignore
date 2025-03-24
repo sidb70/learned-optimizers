@@ -171,3 +171,4 @@ datasets/
 *.png
 *.pt
 *.json
+*.csv
