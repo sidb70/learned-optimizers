@@ -1,4 +1,4 @@
-from hpo import quick_hyperparameter_search
+from hpo import quick_hyperparameter_search, main_hyperparameter_search
 
 def main():
         
@@ -11,8 +11,8 @@ def main():
     best_trainer = search.train_best_config(full_iterations=False)
     
     # Final evaluation
-    eval_loss = best_trainer.evaluate()
-    print(f"Final Best Configuration - Loss: {eval_loss:.6f}")
+    eval_losses = best_trainer.evaluate()
+    print(f"Final Best Configuration - Loss: {eval_losses[-1]:.6f}")
 
 if __name__ == '__main__':
     main()

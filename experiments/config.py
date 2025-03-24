@@ -9,7 +9,7 @@ class Config:
         self.meta_iterations = 10000
         
         # Inner optimization settings
-        self.unroll_steps = 15
+        self.unroll_steps = 50
         self.eval_unroll_steps = 50
         self.truncated_backprop_steps = 15
         

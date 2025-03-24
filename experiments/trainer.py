@@ -43,7 +43,7 @@ class BaselineEvaluator:
             inputs, targets = self.task.get_batch()
             
             # Forward pass
-            loss = self.task.eval(model, inputs, targets)
+            loss = self.task.loss(model(inputs), targets)
             
             # Record metrics
             losses.append(loss.item())

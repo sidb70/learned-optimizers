@@ -91,7 +91,7 @@ class HyperparameterSearch:
         
         # Reduce the number of meta iterations for the search
         original_iterations = config.meta_iterations
-        config.meta_iterations = 200  # Use fewer iterations for faster search
+        config.meta_iterations = 200 # Use fewer iterations for faster search
         
         # Train the meta-optimizer
         meta_losses, mimic_losses, eval_losses = trainer.train()
@@ -100,7 +100,7 @@ class HyperparameterSearch:
         config.meta_iterations = original_iterations
         
         # Evaluate the final model
-        final_loss = trainer.evaluate()
+        final_losses = trainer.evaluate()
         
         # Save the final model
         trainer.save_checkpoint(config.meta_iterations)
@@ -119,7 +119,8 @@ class HyperparameterSearch:
         # Return evaluation results
         result = {
             'run_id': config.run_id,
-            'final_loss': final_loss,
+            'final_losses': final_losses,
+            'final_loss': final_losses[-1],
             'config': {k: getattr(config, k) for k in vars(config) 
                       if not k.startswith('_') and not callable(getattr(config, k))
                       and not isinstance(getattr(config, k), torch.device)},
@@ -292,7 +293,7 @@ def main_hyperparameter_search():
     param_grid = {
         'meta_lr': [0.0005, 0.001, 0.002],
         'hidden_size': [20, 40, 60],
-        'unroll_steps': [5, 10, 15],
+        'unroll_steps': [10, 15, 25, 50],
         'meta_batch_size': [2, 4, 8],
         'mimic_adam_epochs': [0, 100, 200],
         'adam_mimic_lr': [0.0005, 0.001, 0.002]
@@ -308,7 +309,7 @@ def main_hyperparameter_search():
     search.visualize_results(results_df)
     
     # Train best configuration
-    best_trainer = search.train_best_config(full_iterations=True)
+    best_trainer = search.train_best_config(full_iterations=False)
     
     # Compare with baselines
     print("\nComparing with baseline optimizers...")
@@ -334,13 +335,13 @@ def main_hyperparameter_search():
     plt.figure(figsize=(12, 5))
     
     # Evaluate the best model
-    eval_loss = best_trainer.evaluate()
+    eval_losses = best_trainer.evaluate()
     
     # Loss comparison
     plt.subplot(1, 2, 1)
     plt.plot(sgd_losses, label='SGD')
     plt.plot(adam_losses, label='Adam')
-    plt.axhline(y=eval_loss, color='g', linestyle='-', label='Learned Optimizer')
+    plt.axhline(y=eval_losses, color='g', linestyle='-', label='Learned Optimizer')
     plt.title('Loss Comparison')
     plt.xlabel('Step')
     plt.ylabel('Loss')
@@ -353,7 +354,7 @@ def main_hyperparameter_search():
     # Print final results
     print(f"Final Adam Loss: {adam_losses[-1]:.6f}")
     print(f"Final SGD Loss: {sgd_losses[-1]:.6f}")
-    print(f"Final Learned Optimizer Loss: {eval_loss:.6f}")
+    print(f"Final Learned Optimizer Loss: {eval_losses[-1]:.6f}")
     
     return search
 
@@ -366,8 +367,8 @@ def quick_hyperparameter_search():
     param_grid = {
         'meta_lr': [0.001, 0.002],
         'hidden_size': [40, 60],
-        'unroll_steps': [10, 15],
-        'meta_batch_size': [4]
+        'unroll_steps': [10, 50],
+        'meta_batch_size': [4, 8],
     }
     
     # Initialize search
