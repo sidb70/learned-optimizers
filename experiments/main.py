@@ -11,8 +11,8 @@ def main():
     best_trainer = search.train_best_config(full_iterations=False)
     
     # Final evaluation
-    eval_loss, eval_accuracy = best_trainer.evaluate()
-    print(f"Final Best Configuration - Loss: {eval_loss:.6f}, Accuracy: {eval_accuracy:.4f}")
+    eval_loss = best_trainer.evaluate()
+    print(f"Final Best Configuration - Loss: {eval_loss:.6f}")
 
 if __name__ == '__main__':
     main()

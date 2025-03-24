@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.func import functional_call
+from torchviz import make_dot
+from graphviz import Source
 import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt
 import time
@@ -182,9 +184,6 @@ class MetaTrainer:
 
             losses.append(loss.item())
 
-            if not model.training:
-                continue
-
             # Compute gradients with create_graph=True for higher-order derivatives.
             create_graph = step < self.config.truncated_backprop_steps
             grad_list = torch.autograd.grad(loss, param_list, create_graph=create_graph, allow_unused=True)
@@ -194,6 +193,7 @@ class MetaTrainer:
 
             # Compute meta-updates; pass lists of parameters and gradients.
             meta_updates_list = self.meta_optimizer(param_list, list(grads.values()))
+            
             # Reassemble meta_updates as a dictionary matching params.
             meta_updates = {name: update for (name, _), update in zip(params.items(), meta_updates_list)}
 
@@ -216,14 +216,14 @@ class MetaTrainer:
 
             # Optionally detach the parameters from the current graph
             if step == self.config.truncated_backprop_steps - 1 and step < unroll_steps - 1:
-                params = {name: param.detach().requires_grad_() for name, param in params.items()}
+                params = {name: param.detach().requires_grad_() for name, param in params.items()} 
                 param_list = list(params.values())
 
         # Compute final loss with updated parameters
         if model.training and unroll_steps > 0:
             inputs, targets = task.get_batch()
             final_outputs = functional_call(model, params, (inputs,))
-            final_loss = F.cross_entropy(final_outputs, targets)
+            final_loss = task.loss(final_outputs, targets)
             losses[-1] = final_loss
 
         return (losses, mimic_losses) if mimic_adam else losses
@@ -236,7 +236,7 @@ class MetaTrainer:
         # Meta-batch loss
         meta_loss = 0
         mimic_meta_loss = 0 if self.is_in_mimic_phase() else None
-        
+        losses = [ ]
         # Process multiple tasks in the meta-batch
         for e in range(self.config.meta_batch_size):
             # Create a new MLP model
@@ -245,7 +245,7 @@ class MetaTrainer:
             
             # Perform optimization using our learned optimizer
             if self.is_in_mimic_phase():
-                losses, mimic_losses = self.unrolled_optimization(
+                sample_losses, mimic_losses = self.unrolled_optimization(
                     self.train_task, 
                     model, 
                     self.config.unroll_steps,
@@ -254,15 +254,20 @@ class MetaTrainer:
                 # Add mimicking loss
                 mimic_meta_loss = mimic_meta_loss + sum(mimic_losses) / len(mimic_losses)
             else:
-                losses = self.unrolled_optimization(
+                sample_losses = self.unrolled_optimization(
                     self.train_task, 
                     model, 
                     self.config.unroll_steps
                 )
-            
-            # Meta-loss is the final training loss - should be differentiable
-            meta_loss = meta_loss + losses[-1]
-        
+            # meta loss = final training loss
+            meta_loss = meta_loss + sample_losses[-1]
+
+            losses.append(sample_losses)
+            losses[-1][-1] = losses[-1][-1].item()
+            # print("making dot")
+            # make_dot(meta_loss).render("meta_loss")
+            # Source.from_file("meta_loss").render("meta_loss", view=True, cleanup=True)
+            # c = input("Press Enter to continue...")
         # Average meta-loss over the batch
         meta_loss = meta_loss / self.config.meta_batch_size
         
@@ -279,6 +284,9 @@ class MetaTrainer:
         else:
             # Backpropagate through the meta-optimizer
             meta_loss.backward()
+            #make_dot(meta_loss).render("meta_loss_backward")
+            #Source.from_file("meta_loss_backward").render("meta_loss_backward", view=True, cleanup=True)
+            #c = input("Press Enter to continue...")
             
             # Debug gradient flow
             for name, param in self.meta_optimizer.named_parameters():
@@ -287,11 +295,12 @@ class MetaTrainer:
                 # else:
                 #     print(f"Gradient norm for {name}: {param.grad.norm().item()}")
             
-            # Return just the meta-loss
-            return meta_loss    
+            # Return just the meta-loss and losses
+            return meta_loss, losses
     def evaluate(self):
         """Evaluate the learned optimizer."""
         # Create a new MLP model
+        self.meta_optimizer.eval()
         model = self.create_model()
         model.eval()
         
@@ -317,6 +326,8 @@ class MetaTrainer:
         
         # Time tracking
         start_time = time.time()
+
+        inner_losses_trajectories = []
         
         # Training loop
         for iteration in range(self.config.meta_iterations):
@@ -335,7 +346,8 @@ class MetaTrainer:
                           f"Meta-Loss: {meta_loss:.6f}, Mimic-Loss: {mimic_loss:.6f}, "
                           f"Time: {elapsed:.2f}s")
             else:
-                meta_loss = self.train_step()
+                meta_loss, losses_trajectories = self.train_step()
+                inner_losses_trajectories.append(losses_trajectories)
                 meta_losses.append(meta_loss.item())
                 
                 # Log progress
@@ -345,18 +357,22 @@ class MetaTrainer:
                           f"Meta-Loss: {meta_loss.item():.6f}, "
                           f"Time: {elapsed:.2f}s")
             
+
             self.meta_opt.step()
+            self.meta_opt.zero_grad()
             
             
             # Evaluate
             if iteration % self.config.eval_interval == 0:
-                eval_loss, eval_accuracy = self.evaluate()
+                eval_loss = self.evaluate()
+                self.meta_optimizer.train()
                 eval_losses.append(eval_loss)
                 
-                print(f"Evaluation - Loss: {eval_loss:.6f}, Accuracy: {eval_accuracy:.4f}")
+                print(f"Evaluation - Loss: {eval_loss:.6f}")
                 
                 # Plot learning curves
                 self.plot_learning_curves(meta_losses, mimic_losses, eval_losses)
+                self.plot_inner_trajectory(inner_losses_trajectories)
             
             # Save checkpoint
             if iteration % self.config.save_interval == 0:
@@ -371,8 +387,8 @@ class MetaTrainer:
         print("Meta-training complete")
         
         # Final evaluation
-        eval_loss, eval_accuracy = self.evaluate()
-        print(f"Final Evaluation - Loss: {eval_loss:.6f}, Accuracy: {eval_accuracy:.4f}")
+        eval_loss = self.evaluate()
+        print(f"Final Evaluation - Loss: {eval_loss:.6f}")
 
         return meta_losses, mimic_losses, eval_losses
     
@@ -395,6 +411,18 @@ class MetaTrainer:
         self.current_iteration = checkpoint['iteration'] + 1
         print(f"Loaded checkpoint from {checkpoint_path}")
     
+    def plot_inner_trajectory(self, inner_losses_trajectories):
+        '''Plot the inner trajectory of the model during meta-training'''
+        plt.figure(figsize=(15, 10))
+        for i, losses in enumerate(inner_losses_trajectories):
+            plt.plot(range(len(losses)), losses, label=f"Task {i}")
+        plt.title('Inner Trajectories')
+        plt.xlabel('Iteration')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.config.save_dir, 'inner_trajectories.png'))
+        plt.close()
     def plot_learning_curves(self, meta_losses, mimic_losses, eval_losses):
         """Plot learning curves to visualize training progress."""
         plt.figure(figsize=(15, 10))

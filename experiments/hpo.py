@@ -100,7 +100,7 @@ class HyperparameterSearch:
         config.meta_iterations = original_iterations
         
         # Evaluate the final model
-        final_loss, final_accuracy = trainer.evaluate()
+        final_loss = trainer.evaluate()
         
         # Save the final model
         trainer.save_checkpoint(config.meta_iterations)
@@ -120,7 +120,6 @@ class HyperparameterSearch:
         result = {
             'run_id': config.run_id,
             'final_loss': final_loss,
-            'final_accuracy': final_accuracy,
             'config': {k: getattr(config, k) for k in vars(config) 
                       if not k.startswith('_') and not callable(getattr(config, k))
                       and not isinstance(getattr(config, k), torch.device)},
