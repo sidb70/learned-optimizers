@@ -38,3 +38,11 @@ class Config:
         
         # Device settings
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.num_workers = 1
+    def load(self, config_dict):
+        for key, value in config_dict.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                self.key = value
+                self.__dict__[key] = value

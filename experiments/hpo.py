@@ -11,6 +11,9 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor  
+import multiprocessing
+
+multiprocessing.set_start_method('spawn', force=True)
 
 class HyperparameterSearch:
     def __init__(self, base_config):
@@ -91,7 +94,7 @@ class HyperparameterSearch:
         
         # Reduce the number of meta iterations for the search
         original_iterations = config.meta_iterations
-        config.meta_iterations = 200 # Use fewer iterations for faster search
+        config.meta_iterations = 200# Use fewer iterations for faster search
         
         # Train the meta-optimizer
         meta_losses, mimic_losses, eval_losses = trainer.train()
@@ -145,17 +148,12 @@ class HyperparameterSearch:
         print(f"Generated {len(configs)} configurations to evaluate")
         
         if num_workers > 1:
-            # Parallel execution
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 self.results = list(executor.map(self.evaluate_config, configs))
         else:
-            # Sequential execution
             self.results = [self.evaluate_config(config) for config in configs]
         
-        # Convert results to DataFrame
         results_df = pd.DataFrame(self.results)
-        
-        # Save results
         results_df.to_csv(os.path.join(self.results_dir, 'search_results.csv'), index=False)
         
         # Find best configuration
@@ -192,7 +190,7 @@ class HyperparameterSearch:
         plt.close()
         
         # For top parameters, create more detailed visualization
-        if len(results_df) > 1:
+        if results_df.ndim > 1:
             self._visualize_parameter_effects(results_df)
     
     def _visualize_parameter_effects(self, results_df):
@@ -203,19 +201,23 @@ class HyperparameterSearch:
             results_df: DataFrame with search results
         """
         # Extract configuration parameters
-        # config_df = pd.DataFrame([r['config'] for r in self.results])
-        config_df = pd.DataFrame([
-            {k: tuple(v) if isinstance(v, list) else v for k, v in r['config'].items()}
-            for r in self.results
-        ])
+        config_df = pd.DataFrame([r['config'] for r in self.results])
+        # config_df = pd.DataFrame([
+        #     {k: tuple(v) if isinstance(v, list) else v for k, v in r['config'].items()}
+        #     for r in self.results
+        # ])
 
         
         # Combine with results
-        combined_df = pd.concat([results_df[['run_id', 'final_accuracy', 'final_loss']], config_df], axis=1)
-        
-        # Identify parameters that vary
-        varying_params = [col for col in config_df.columns 
-                          if len(config_df[col].unique()) > 1 and col != 'run_id']
+        combined_df = pd.concat([results_df[['run_id', 'final_loss']], config_df], axis=1)
+
+        # convert entries with lists to tuples
+        varying_params = []
+        for col in config_df.columns:
+            if pd.api.types.is_list_like(config_df[col].iloc[0]):
+                config_df[col] = config_df[col].apply(tuple)
+            if col not in ['run_id', 'task_kwargs', 'save_dir']  and len(config_df[col].unique()) > 1:
+                varying_params.append(col)
         
         if not varying_params:
             return
@@ -229,15 +231,15 @@ class HyperparameterSearch:
                 continue
                 
             plt.subplot(len(varying_params), 1, i+1)
-            plt.scatter(combined_df[param], combined_df['final_accuracy'])
+            plt.scatter(combined_df[param], combined_df['final_loss'])
             plt.xlabel(param)
-            plt.ylabel('Final Accuracy')
-            plt.title(f'Effect of {param} on Accuracy')
+            plt.ylabel('Final Loss')
+            plt.title(f'Effect of {param} on Loss')
             
             # Add trend line if more than 2 points
             if len(combined_df) > 2:
                 try:
-                    z = np.polyfit(combined_df[param], combined_df['final_accuracy'], 1)
+                    z = np.polyfit(combined_df[param], combined_df['final_loss'], 1)
                     p = np.poly1d(z)
                     plt.plot(sorted(combined_df[param].unique()), 
                              p(sorted(combined_df[param].unique())), "r--")
@@ -276,7 +278,7 @@ class HyperparameterSearch:
         
         # Use the original number of iterations
         if not full_iterations:
-            self.best_config.meta_iterations = 1000  # Reduced for testing
+            self.best_config.meta_iterations = 200 # Reduced for testing
             
         # Train the meta-optimizer
         trainer.train()
@@ -376,9 +378,8 @@ def quick_hyperparameter_search():
     
     # Reduce iterations for quick testing
     base_config.meta_iterations = 200
-    
     # Run search
-    results_df = search.run_search(param_grid, num_workers=1)
+    results_df = search.run_search(param_grid, num_workers=base_config.num_workers)
     
     # Visualize results
     search.visualize_results(results_df)
