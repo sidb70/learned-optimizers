@@ -17,6 +17,18 @@ from meta_optimizers import LSTMOptimizer, AdamStateTracker
 from optimizees import MLP
 
 
+def create_model(config):
+    """Create a new MLP model for the task."""
+    if config.task == MNISTTask:
+        input_size = config.task_kwargs.get('downsample_size', 16) ** 2
+        model = MLP(input_size, config.hidden_sizes, 10).to(config.device)
+        return model
+    elif config.task == RosenbrockTask or config.task == QuadraticTask:
+        input_size = 2
+        model = MLP(input_size, config.hidden_sizes, 1).to(config.device)
+        return model
+    else:
+        raise ValueError("Model not implemented for task.")
 
 # Baseline evaluation
 class BaselineEvaluator:
@@ -27,8 +39,7 @@ class BaselineEvaluator:
     def evaluate_optimizer(self, optimizer_class, optimizer_kwargs, steps):
         """Evaluate a standard optimizer."""
         # Create a new model
-        input_size = self.config.downsample_size * self.config.downsample_size
-        model = MLP(input_size, self.config.hidden_sizes, 10).to(self.config.device)
+        model = create_model(self.config)
         model.train()
         
         # Create optimizer
@@ -81,18 +92,8 @@ class MetaTrainer:
         # Current meta-iteration counter
         self.current_iteration = 0
 
-    def create_model(self):
-        """Create a new MLP model for the task."""
-        if self.config.task == MNISTTask:
-            input_size = self.config.task_kwargs.get('downsample_size', 16) ** 2
-            model = MLP(input_size, self.config.hidden_sizes, 10).to(self.config.device)
-            return model
-        elif self.config.task == RosenbrockTask or self.config.task == QuadraticTask:
-            input_size = 2
-            model = MLP(input_size, self.config.hidden_sizes, 1).to(self.config.device)
-            return model
-        else:
-            raise ValueError("Model not implemented for task.")
+        self.model = create_model(config)
+        self.model.train()  
     
     def is_in_mimic_phase(self):
         """Check if we're in the Adam mimicking phase."""
@@ -240,7 +241,7 @@ class MetaTrainer:
         # Process multiple tasks in the meta-batch
         for e in range(self.config.meta_batch_size):
             # Create a new MLP model
-            model = self.create_model()
+            model = create_model(self.config)
             model.train()
             
             # Perform optimization using our learned optimizer
@@ -298,7 +299,7 @@ class MetaTrainer:
         """Evaluate the learned optimizer."""
         # Create a new MLP model
         self.meta_optimizer.eval()
-        model = self.create_model()
+        model = create_model(self.config)
         model.eval()
         
         # Perform optimization using our learned optimizer
@@ -369,9 +370,9 @@ class MetaTrainer:
                 
                 self.plot_eval_losses(curr_eval_losses, iteration)
                 # Plot learning curves
-                self.plot_learning_curves(meta_losses, mimic_losses, eval_losses, fname=f'learning_curves_eval_it_{iteration}.png')
-                # Plot inner trajectories 
-                self.plot_inner_trajectory(inner_losses_trajectories)
+                # self.plot_learning_curves(meta_losses, mimic_losses, eval_losses, fname=f'learning_curves_eval_it_{iteration}.png')
+                # # Plot inner trajectories 
+                # self.plot_inner_trajectory(inner_losses_trajectories)
             
             # Save checkpoint
             if iteration % self.config.save_interval == 0:
