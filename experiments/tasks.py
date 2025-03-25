@@ -111,7 +111,7 @@ class MNISTTask(Task):
     
 
     
-    def loss(self, model, outputs, targets):
+    def loss(self, outputs, targets):
         loss = F.cross_entropy(outputs, targets)
         return loss
     
