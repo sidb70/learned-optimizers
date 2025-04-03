@@ -1,27 +1,26 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torchvision
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-from torch.func import functional_call
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from concurrent.futures import ProcessPoolExecutor
-import itertools
-import copy
-from functools import partial
-import json
-import matplotlib.pyplot as plt
-import time
-import os
-import random
-from config import Config
-from tasks import MNISTTask, RosenbrockTask
-from optimizees import MLP
-
-
+from gmn_lim.graph_construct.constants import NODE_TYPES, EDGE_TYPES, CONV_LAYERS, NORM_LAYERS, RESIDUAL_LAYERS, NODE_TYPE_TO_LAYER
+from gmn_lim.graph_construct.utils import (
+    make_node_feat,
+    make_edge_attr,
+    conv_to_graph,
+    linear_to_graph,
+    norm_to_graph,
+    ffn_to_graph,
+    basic_block_to_graph,
+    self_attention_to_graph,
+    equiv_set_linear_to_graph,
+    triplanar_to_graph,
+)
+from gmn_lim.graph_construct.model_arch_graph import (
+    seq_to_feats,
+    sequential_to_arch,
+    arch_to_graph,
+    graph_to_arch,
+    arch_to_named_params
+)
+from gmn_lim.graph_models import EdgeMPNNDiT
 # config = Config()
 # # Create save directory if it doesn't exist
 # os.makedirs(config.save_dir, exist_ok=True)
@@ -120,6 +119,32 @@ class LSTMOptimizer(nn.Module):
             updates.append(update.view(param.shape))
         
         return updates
+
+class GMNOptimizer(nn.Module):
+    def init_weights(self):
+        for block in self.convs:
+            if block.update_node:
+                nn.init.constant_(block.node_mlp[-1].weight, 1)
+                nn.init.constant_(block.node_mlp[-1].bias, 1)
+
+            if block.update_edge:
+                nn.init.constant_(block.edge_mlp[-1].weight, 1)
+                nn.init.constant_(block.edge_mlp[-1].bias, 1)
+
+    def __init__(self, hidden_size):
+        super(GMNOptimizer, self).__init__()
+        
+        # lstm inputs: [param_grad, param_value, momentum, prev_update]
+        self.gmn = EdgeMPNNDiT(
+            node_in_dim=3,
+            edge_in_dim=7,
+            hidden_dim=hidden_size,
+            edge_out_dim=1,
+            num_layers=3,
+        )
+        
+        self.init_weights()
+        self.arch = None
 
 
 # Adam state tracker for mimicking
