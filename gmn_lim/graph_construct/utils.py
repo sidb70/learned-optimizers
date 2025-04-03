@@ -37,7 +37,7 @@ def make_node_feat(num_neurons, layer_num, node_type, is_hidden_neuron=False):
     x[:, 1] is neuron order (if the neuron is an input or output neuron of the whole network)
     x[:, 2] is the node type
     """
-    node_features = torch.zeros(num_neurons, 3, dtype=torch.long)
+    node_features = torch.zeros(num_neurons, 3, dtype=torch.float32)
     node_features[:, 0] = layer_num
     if is_hidden_neuron:
         # if it is a hidden neuron, don't give an order
@@ -45,8 +45,8 @@ def make_node_feat(num_neurons, layer_num, node_type, is_hidden_neuron=False):
     else:
         node_features[:, 1] = torch.arange(num_neurons)
     node_features[:, 2] = node_type
+    assert node_features.shape[1] == 3, "node features should have 3 dimensions"
     return node_features
-
 
 def make_edge_attr(weights, layer_num, edge_type, conv_size=None, triplanar_size=None):
     """
@@ -59,33 +59,35 @@ def make_edge_attr(weights, layer_num, edge_type, conv_size=None, triplanar_size
     edge_attr[:, (3,4,5)] are position in convolution kernel (if conv_size is not None)
     edge_attr[:, (3,4)] are position in triplanar grid (if triplanar_size is not None)
     """
-    edge_attr = torch.zeros(weights.shape[0], 6)
+    # Create a new tensor with zeros
+    edge_attr = torch.zeros(weights.shape[0], 6, device=weights.device)
+    
     edge_attr[:, 0] = weights[:, 0]
     edge_attr[:, 1] = layer_num
     edge_attr[:, 2] = edge_type
     edge_attr[:, 3:] = -1
-
+    
     # encode position of convolution weights
     if conv_size is not None:
-        positions = torch.zeros(conv_size)
+        positions = torch.zeros(conv_size, device=weights.device)
         kernel_size = conv_size[2:]
         ndim = len(kernel_size)
-        # kernel_pos = torch.arange(math.prod(kernel_size)).reshape(kernel_size)
+        
         if ndim == 1:
-            x = torch.arange(kernel_size[0])[None, None, :]
+            x = torch.arange(kernel_size[0], device=weights.device)[None, None, :]
             positions[:] = x
             edge_attr[:, 3] = positions.flatten()
         if ndim == 2:
-            x = torch.arange(kernel_size[0])[None, None, :, None]
-            y = torch.arange(kernel_size[1])[None, None, None, :]
+            x = torch.arange(kernel_size[0], device=weights.device)[None, None, :, None]
+            y = torch.arange(kernel_size[1], device=weights.device)[None, None, None, :]
             positions[:] = x
             edge_attr[:, 3] = positions.flatten()
             positions[:] = y
             edge_attr[:, 4] = positions.flatten()
         if ndim == 3:
-            x = torch.arange(kernel_size[0])[None, None, :, None, None]
-            y = torch.arange(kernel_size[1])[None, None, None, :, None]
-            z = torch.arange(kernel_size[2])[None, None, None, None, :]
+            x = torch.arange(kernel_size[0], device=weights.device)[None, None, :, None, None]
+            y = torch.arange(kernel_size[1], device=weights.device)[None, None, None, :, None]
+            z = torch.arange(kernel_size[2], device=weights.device)[None, None, None, None, :]
             positions[:] = x
             edge_attr[:, 3] = positions.flatten()
             positions[:] = y
@@ -94,22 +96,22 @@ def make_edge_attr(weights, layer_num, edge_type, conv_size=None, triplanar_size
             edge_attr[:, 5] = positions.flatten()
     elif triplanar_size is not None:
         d, N = triplanar_size
-        xyz_vals = torch.zeros(1, 3 * d, N, N, 3)
+        xyz_vals = torch.zeros(1, 3 * d, N, N, 3, device=weights.device)
         # encode xy
-        x = torch.linspace(-1, 1, steps=N)[None, None, :, None]
-        y = torch.linspace(-1, 1, steps=N)[None, None, None, :]
+        x = torch.linspace(-1, 1, steps=N, device=weights.device)[None, None, :, None]
+        y = torch.linspace(-1, 1, steps=N, device=weights.device)[None, None, None, :]
         xyz_vals[:, :d, :, :, 0] = x
         xyz_vals[:, :d, :, :, 1] = y
         xyz_vals[:, :d, :, :, 2] = 0
         # encode yz
-        y = torch.linspace(-1, 1, steps=N)[None, None, :, None]
-        z = torch.linspace(-1, 1, steps=N)[None, None, None, :]
+        y = torch.linspace(-1, 1, steps=N, device=weights.device)[None, None, :, None]
+        z = torch.linspace(-1, 1, steps=N, device=weights.device)[None, None, None, :]
         xyz_vals[:, d : 2 * d, :, :, 0] = 0
         xyz_vals[:, d : 2 * d, :, :, 1] = y
         xyz_vals[:, d : 2 * d, :, :, 2] = z
         # encode zx
-        z = torch.linspace(-1, 1, steps=N)[None, None, :, None]
-        x = torch.linspace(-1, 1, steps=N)[None, None, None, :]
+        z = torch.linspace(-1, 1, steps=N, device=weights.device)[None, None, :, None]
+        x = torch.linspace(-1, 1, steps=N, device=weights.device)[None, None, None, :]
         xyz_vals[:, 2 * d :, :, :, 0] = x
         xyz_vals[:, 2 * d :, :, :, 1] = 0
         xyz_vals[:, 2 * d :, :, :, 2] = z
@@ -119,9 +121,8 @@ def make_edge_attr(weights, layer_num, edge_type, conv_size=None, triplanar_size
         edge_attr[:, 3] = xvals.flatten()
         edge_attr[:, 4] = yvals.flatten()
         edge_attr[:, 5] = zvals.flatten()
-
+    
     return edge_attr
-
 
 def make_residual_feat(num_neurons, layer_num):
     edge_attr = torch.zeros(num_neurons, 6)

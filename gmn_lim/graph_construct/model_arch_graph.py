@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 # model <--> arch <--> graph
 
 
+
 def seq_to_feats(seq: nn.Sequential):
     """
     Convert a sequential model to node features and edge attributes.
@@ -46,15 +47,12 @@ def seq_to_feats(seq: nn.Sequential):
     """
     return arch_to_graph(sequential_to_arch(seq))
 
-
 def sequential_to_arch(model):
     """
     Convert a sequential model to an architecture, which is a list of lists where each list contains the
         layer type and the weights and biases of the layer.
-
     Args:
         model (torch.nn.Sequential): The sequential model to convert.
-
     Returns:
         List[List[torch.nn.Module, torch.Tensor, torch.Tensor]]: The architecture of the model.
             - The first element of each list is the layer type.
@@ -65,59 +63,30 @@ def sequential_to_arch(model):
     # or ordered list of modules
     arch = []
     weight_bias_modules = CONV_LAYERS + [nn.Linear] + NORM_LAYERS
-    for module in model:
+    for i, module in enumerate(model):
         layer = [type(module)]
         if type(module) in weight_bias_modules:
-            layer.append(module.weight)
-            layer.append(module.bias)
-        elif type(module) == BasicBlock:
-            layer.extend(
-                [
-                    module.conv1.weight,
-                    module.bn1.weight,
-                    module.bn1.bias,
-                    module.conv2.weight,
-                    module.bn2.weight,
-                    module.bn2.bias,
-                ]
-            )
-            if len(module.shortcut) > 0:
-                layer.extend(
-                    [
-                        module.shortcut[0].weight,
-                        module.shortcut[1].weight,
-                        module.shortcut[1].bias,
-                    ]
-                )
-        elif type(module) == PositionwiseFeedForward:
-            layer.append(module.lin1.weight)
-            layer.append(module.lin1.bias)
-            layer.append(module.lin2.weight)
-            layer.append(module.lin2.bias)
-        elif type(module) == SelfAttention:
-            layer.append(module.attn.in_proj_weight)
-            layer.append(module.attn.in_proj_bias)
-            layer.append(module.attn.out_proj.weight)
-            layer.append(module.attn.out_proj.bias)
-        elif type(module) == EquivSetLinear:
-            layer.append(module.lin1.weight)
-            layer.append(module.lin1.bias)
-            layer.append(module.lin2.weight)
-        elif type(module) == TriplanarGrid:
-            layer.append(module.tgrid)
+            weight = module.weight
+            bias = module.bias
+            
+            layer.append(weight)
+            layer.append(bias)
         else:
             if len(list(module.parameters())) != 0:
                 raise ValueError(
                     f"{type(module)} has parameters but is not yet supported"
                 )
             continue
+        layer.append(i)
         arch.append(layer)
+    
     return arch
 
 
 def arch_to_graph(arch, self_loops=False):
     """
     Convert an architecture to a graph, which is represented by node features, edge indices, and edge attributes.
+    This version ensures the weights and biases remain in the computation graph.
 
     Args:
         arch (List[List[torch.nn.Module, torch.Tensor, torch.Tensor]]): The architecture of the model.
@@ -130,17 +99,10 @@ def arch_to_graph(arch, self_loops=False):
         torch.Tensor: The node feature matrix - num_nodes x 3 node features
         torch.Tensor: The edge indices - 2 x num_edges (source, target)
         torch.Tensor: The edge attribute matrix - num_edges x 6 edge features
-
     """
-    curr_idx = (
-        0  # used to keep track of current node index relative to the entire graph
-    )
-    node_features = (
-        []
-    )  # stores a list of tensors, each representing the features of a node. num_nodes x 3 node features
-    edge_index = (
-        []
-    )  # stores a list of tensors, each stores 2xnum_edges (source, target)
+    curr_idx = 0  # used to keep track of current node index relative to the entire graph
+    node_features = []  # stores a list of tensors, each representing the features of a node
+    edge_index = []  # stores a list of tensors, each stores 2xnum_edges (source, target)
     edge_attr = []  # stores a list of tensors, each stores num_edges x 6 edge features
     layer_num = 0  # keep track of current layer number
 
@@ -164,6 +126,8 @@ def arch_to_graph(arch, self_loops=False):
     for i, layer in enumerate(arch):
         is_output = i == len(arch) - 1
         layer_type = layer[0]
+        
+        
         if layer_type in CONV_LAYERS:
             weight_mat, bias = layer[1], layer[2]
             ret = conv_to_graph(
@@ -215,7 +179,6 @@ def arch_to_graph(arch, self_loops=False):
                 self_loops,
                 norm_type=norm_type,
             )
-            # print(ret['out_neuron_idx'])
         elif layer_type == BasicBlock:
             ret = basic_block_to_graph(
                 layer[1:], layer_num, in_neuron_idx, is_output, curr_idx, self_loops
@@ -275,11 +238,10 @@ def arch_to_graph(arch, self_loops=False):
             node_features.append(feat)
             curr_idx += feat.shape[0]
 
-        # print(len(ret['edge_attr']), len(ret['edge_index'][0]), layer_type)
-
     node_features = torch.cat(node_features, dim=0)
     edge_index = torch.cat(edge_index, dim=1)
     edge_attr = torch.cat(edge_attr, dim=0)
+    
     return node_features, edge_index, edge_attr
 
 def feats_to_arch(node_features):
@@ -302,87 +264,30 @@ def graph_to_arch(arch, weights):
     curr_idx = 0
     for l, layer in enumerate(arch):
         lst = [layer[0]]
-        if layer[0] != SelfAttention:
-            for tensor in layer[1:]:
-                if tensor is not None:
-                    weight_size = math.prod(tensor.shape)
-                    reshaped = weights[curr_idx : curr_idx + weight_size].reshape(
-                        tensor.shape
-                    )
-                    lst.append(reshaped)
-                    curr_idx += weight_size
-                else:
-                    lst.append(None)
-        else:
-            # handle in_proj stuff differently, because pytorch stores it all as a big matrix
-            in_proj_weight_shape = layer[1].shape
-            dim = in_proj_weight_shape[1]
-            in_proj_weight = []
-            in_proj_bias = []
-            for _ in range(3):
-                # get q, k, and v
-                weight_size = dim * dim
-                reshaped = weights[curr_idx : curr_idx + weight_size].reshape(dim, dim)
-                in_proj_weight.append(reshaped)
+        for tensor in layer[1:-1]: # ignore first elem (layer type) and last elem (layer number)
+            if tensor is not None:
+                weight_size = math.prod(tensor.shape)
+                reshaped = weights[curr_idx : curr_idx + weight_size].reshape(tensor.shape) 
+                lst.append(reshaped)
                 curr_idx += weight_size
-
-                bias_size = dim
-                reshaped = weights[curr_idx : curr_idx + bias_size].reshape(dim)
-                in_proj_bias.append(reshaped)
-                curr_idx += bias_size
-
-            # concatenate q, k, v weights and biases
-            lst.append(torch.cat(in_proj_weight, 0))
-            lst.append(torch.cat(in_proj_bias, 0))
-
-            # out_proj handled normally
-            for tensor in layer[3:]:
-                if tensor is not None:
-                    weight_size = math.prod(tensor.shape)
-                    reshaped = weights[curr_idx : curr_idx + weight_size].reshape(
-                        tensor.shape
-                    )
-                    lst.append(reshaped)
-                    curr_idx += weight_size
-                else:
-                    lst.append(None)
-
-        # handle residual connections, and other edges that don't correspond to weights
-        if layer[0] == PositionwiseFeedForward:
-            residual_size = layer[1].shape[1]
-            curr_idx += residual_size
-        elif layer[0] == BasicBlock:
-            residual_size = layer[1].shape[0]
-            curr_idx += residual_size
-        elif layer[0] == SelfAttention:
-            residual_size = layer[1].shape[1]
-            curr_idx += residual_size
-
+        lst.append(layer[-1]) # append layer number
         arch_new.append(lst)
     return arch_new
 
 
-def arch_to_sequential(arch, model):
-    # model is a model of the correct architecture
-    arch_idx = 0
-    for child in model.children():
-        if len(list(child.parameters())) > 0:
-            layer = arch[arch_idx]
-            sd = child.state_dict()
-            layer_idx = 1
-            for i, k in enumerate(sd):
-                if (
-                    "running_mean" in k
-                    or "running_var" in k
-                    or "num_batches_tracked" in k
-                ):
-                    continue
-                param = nn.Parameter(layer[layer_idx])
-                sd[k] = param
-                layer_idx += 1
-            child.load_state_dict(sd)
-            arch_idx += 1
-    return model
+def arch_to_named_params(arch):
+    '''
+    arch: the architecture of the model, as a list of lists
+
+    returns a generator of tuples of (name, param)
+    '''
+
+    
+    for i, layer in enumerate(arch):
+        layer_num = layer[-1]
+        yield f'{layer_num}.weight', layer[1]
+        yield f'{layer_num}.bias', layer[2]
+
 
 
 def visualize_graph(x, edge_index, edge_attr):

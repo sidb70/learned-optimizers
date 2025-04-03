@@ -90,7 +90,7 @@ class BasicBlock(nn.Module):
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        out += self.shortcut(x)
+        out = out + self.shortcut(x)
         out = F.relu(out)
         return out
 
@@ -221,5 +221,5 @@ class WeightEncodedImplicit(nn.Module):
         if self.out_actvn:
             o = self.out_actvn(o)
         if self.spherical_bias:
-            o += (x * x + 1e-10).sum(1, keepdim=True).sqrt_() - 0.5
+            o = o + (x * x + 1e-10).sum(1, keepdim=True).sqrt_() - 0.5
         return o
