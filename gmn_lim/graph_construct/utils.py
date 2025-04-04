@@ -48,7 +48,7 @@ def make_node_feat(num_neurons, layer_num, node_type, is_hidden_neuron=False):
     assert node_features.shape[1] == 3, "node features should have 3 dimensions"
     return node_features
 
-def make_edge_attr(weights, layer_num, edge_type, conv_size=None, triplanar_size=None):
+def make_edge_attr(weights, grads, layer_num, edge_type, conv_size=None, triplanar_size=None):
     """
     weights is num_edges x 1
     triplanar size is of form (dim, N), where N is resolution [only for triplanar grid module]
@@ -60,12 +60,13 @@ def make_edge_attr(weights, layer_num, edge_type, conv_size=None, triplanar_size
     edge_attr[:, (3,4)] are position in triplanar grid (if triplanar_size is not None)
     """
     # Create a new tensor with zeros
-    edge_attr = torch.zeros(weights.shape[0], 6, device=weights.device)
-    
+    edge_attr = torch.zeros(weights.shape[0], 7, device=weights.device)
     edge_attr[:, 0] = weights[:, 0]
     edge_attr[:, 1] = layer_num
     edge_attr[:, 2] = edge_type
     edge_attr[:, 3:] = -1
+    if grads is not None:
+        edge_attr[:,6] = grads.flatten()
     
     # encode position of convolution weights
     if conv_size is not None:
@@ -187,6 +188,7 @@ def conv_to_graph(
     edge_attr.append(
         make_edge_attr(
             weight.reshape(-1, 1),
+            weight.grad.view(-1, 1) if weight.grad is not None else None,
             layer_num,
             EDGE_TYPES["conv_weight"],
             conv_size=weight.shape,
@@ -205,7 +207,8 @@ def conv_to_graph(
     if bias is not None:  # checks if layer has bias
         if self_loops:
             edge_attr.append(
-                make_edge_attr(bias.reshape(-1, 1), layer_num, EDGE_TYPES["conv_bias"])
+                make_edge_attr(bias.reshape(-1, 1), bias.grad.view(-1, 1) if bias.grad is not None else None,
+                               layer_num, EDGE_TYPES["conv_bias"])
             )
             weight_edges = torch.cat(
                 (out_neuron_idx[None, :], out_neuron_idx[None, :]), dim=0
@@ -213,7 +216,8 @@ def conv_to_graph(
             edge_index.append(weight_edges)
         else:
             edge_attr.append(
-                make_edge_attr(bias.reshape(-1, 1), layer_num, EDGE_TYPES["conv_bias"])
+                make_edge_attr(bias.reshape(-1, 1), bias.grad.view(-1, 1) if bias.grad is not None else None,
+                               layer_num, EDGE_TYPES["conv_bias"])
             )
             bias_node = make_node_feat(
                 1, layer_num + 1, NODE_TYPES["channel_bias"], False
@@ -321,7 +325,8 @@ def linear_to_graph(
         pass
 
     edge_attr.append(
-        make_edge_attr(weight.reshape(-1, 1), layer_num, EDGE_TYPES["lin_weight"])
+        make_edge_attr(weight.reshape(-1, 1), weight.grad.view(-1, 1) if weight.grad is not None else None,
+                       layer_num, EDGE_TYPES["lin_weight"])
     )
 
     # print(edge_attr[0].shape)
@@ -339,7 +344,8 @@ def linear_to_graph(
     if bias is not None:  # checks if layer has bias
         if self_loops:
             edge_attr.append(
-                make_edge_attr(bias.reshape(-1, 1), layer_num, EDGE_TYPES["lin_bias"])
+                make_edge_attr(bias.reshape(-1, 1), bias.grad.view(-1, 1) if bias.grad is not None else None,
+                               layer_num, EDGE_TYPES["lin_bias"])
             )
             weight_edges = torch.cat(
                 (out_neuron_idx[None, :], out_neuron_idx[None, :]), dim=0
@@ -347,7 +353,8 @@ def linear_to_graph(
             edge_index.append(weight_edges)
         else:
             edge_attr.append(
-                make_edge_attr(bias.reshape(-1, 1), layer_num, EDGE_TYPES["lin_bias"])
+                make_edge_attr(bias.reshape(-1, 1), bias.grad.view(-1, 1) if bias.grad is not None else None,
+                               layer_num, EDGE_TYPES["lin_bias"])
             )
 
             bias_node = make_node_feat(
@@ -467,11 +474,13 @@ def norm_to_graph(
 
     edge_attr.append(
         make_edge_attr(
-            gamma.reshape(-1, 1), layer_num, EDGE_TYPES[f"{norm_type}_gamma"]
+            gamma.reshape(-1, 1), gamma.grad.view(-1, 1) if gamma.grad is not None else None,
+            layer_num, EDGE_TYPES[f"{norm_type}_gamma"]
         )
     )
     edge_attr.append(
-        make_edge_attr(beta.reshape(-1, 1), layer_num, EDGE_TYPES[f"{norm_type}_beta"])
+        make_edge_attr(beta.reshape(-1, 1), beta.grad.view(-1, 1) if beta.grad is not None else None,
+                       layer_num, EDGE_TYPES[f"{norm_type}_beta"])
     )
 
     edge_attr = torch.cat(edge_attr, dim=0)
@@ -879,7 +888,8 @@ def triplanar_to_graph(tgrid, layer_num, is_output=False, curr_idx=0):
     all_node_feats = torch.cat([xyz_x, spatial_x, neuron_x], 0)
     weights = tgrid.flatten()[:, None]
     edge_attr = make_edge_attr(
-        weights, layer_num, EDGE_TYPES["triplanar"], triplanar_size=(dim, N)
+        weights, weights.grad.view(-1, 1) if weights.grad is not None else None,
+        layer_num, EDGE_TYPES["triplanar"], triplanar_size=(dim, N)
     )
 
     in_neuron_idx = torch.cat([xyz_idx, spatial_neuron_idx], 0)
